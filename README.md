@@ -15,7 +15,7 @@ I also wanted the project to be honest about what it is. SkyGlow is an education
 - Moves through Bortle classes 1–9 with an interactive slider
 - Includes presets for dark-sky, rural, suburban, and central-city conditions
 - Compares a real dark-site photograph with the selected pollution level
-- Softens faint stars and Milky Way detail as skyglow increases
+- Fades compact stars and Milky Way contrast as skyglow increases
 - Adds a warmer and brighter atmospheric glow near the horizon
 - Shows an approximate limiting magnitude and naked-eye star estimate
 - Switches between side-by-side and selected-sky views
@@ -25,13 +25,13 @@ The app uses one source photograph for all nine classes. It does not swap betwee
 
 ## How the simulation works
 
-SkyGlow begins with a real panoramic exposure from Cerro Paranal in Chile. As the Bortle level rises, the program mixes the photograph toward a softer copy, reducing the small contrasts that make faint stars visible.
+SkyGlow begins with a real panoramic exposure from Cerro Paranal in Chile. As the Bortle level rises, the program identifies small positive brightness details and dims those compact points. It then blends a muted atmospheric-glow layer into the sky.
 
-A warm, vertically shaped haze is added mostly above the horizon. The landscape is protected from most of that overlay so it remains recognizable. The result is a photographic visualization, although it is still not a calibrated prediction for a real address.
+The boundary of the photographed mountain ridge is stored as a simple sky mask. The original foreground is composited back unchanged, so rocks and terrain remain sharp at every level. The result is a photographic visualization, although it is still not a calibrated prediction for a real address.
 
 ## What I learned
 
-The first version generated every star and landscape layer in Python. It worked as a diagram, but it did not carry the emotional effect of an actual dark sky. Rebuilding it around one real photograph made the comparison much stronger and forced me to think more carefully about the difference between recorded detail and a simulated visibility effect.
+The first version generated every star and landscape layer in Python. It worked as a diagram, but it did not carry the emotional effect of an actual dark sky. My next attempt blurred the photograph to remove faint stars, which also blurred the ground and looked physically wrong. Replacing that shortcut with a sky mask and selective contrast reduction made the comparison much more convincing.
 
 I also had to separate a clear visual explanation from a scientific prediction. The Bortle scale is useful, but visibility in real life also depends on weather, altitude, Moon phase, eyesight, and nearby lights. The app states that limitation instead of hiding it.
 

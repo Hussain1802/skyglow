@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 
 PHOTO_PATH = Path(__file__).parent / "assets" / "paranal-panorama.jpg"
@@ -41,8 +41,8 @@ MILKY_WAY_LABELS = {
     5: "Faint",
     6: "Barely visible",
     7: "Lost in skyglow",
-    8: "Not visible",
-    9: "Not visible",
+    8: "Invisible unaided",
+    9: "Invisible unaided",
 }
 
 BORTLE_NAMES = {
@@ -80,48 +80,135 @@ def load_source_photo():
     return photo.resize(SCENE_SIZE, Image.Resampling.LANCZOS)
 
 
-def make_haze_layer(level):
-    """Build warm atmospheric glow, strongest near the horizon."""
+@lru_cache(maxsize=1)
+def make_sky_mask():
+    """Separate the photographed sky from the foreground landscape."""
     width, height = SCENE_SIZE
-    pollution = (level - 1) / 8
 
-    y = np.linspace(0, 1, height)[:, None]
-    horizon_glow = np.exp(-((y - 0.66) / 0.24) ** 2)
-    upper_haze = 0.20 + 0.30 * y
-    strength = (0.18 * upper_haze + 0.70 * horizon_glow) * pollution**1.15
+    # This horizon follows the fixed Paranal panorama. Keeping it explicit is
+    # simpler and more reliable than pretending this is general image segmentation.
+    horizon = [
+        (0, 588),
+        (80, 590),
+        (160, 594),
+        (240, 590),
+        (320, 595),
+        (400, 601),
+        (480, 600),
+        (560, 602),
+        (640, 602),
+        (680, 599),
+        (700, 598),
+        (720, 594),
+        (740, 586),
+        (760, 576),
+        (780, 567),
+        (800, 564),
+        (820, 574),
+        (840, 582),
+        (860, 592),
+        (880, 600),
+        (900, 604),
+        (920, 610),
+        (940, 605),
+        (960, 604),
+        (1040, 599),
+        (1120, 610),
+        (1200, 614),
+        (1280, 624),
+        (1360, 623),
+        (1440, 617),
+        (1520, 613),
+        (1600, 610),
+    ]
 
-    # The mask fades before reaching the ground, so the landscape stays solid.
-    sky_mask = np.clip((0.83 - y) / 0.14, 0, 1)
-    strength *= sky_mask
-    strength = np.repeat(strength, width, axis=1)
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.polygon(
+        [(0, 0), (width, 0), *reversed(horizon)],
+        fill=255,
+    )
 
-    haze = np.zeros((height, width, 4), dtype=np.uint8)
-    haze[:, :, 0] = 226
-    haze[:, :, 1] = 132
-    haze[:, :, 2] = 72
-    haze[:, :, 3] = np.uint8(np.clip(strength * 255, 0, 225))
-
-    return Image.fromarray(haze, "RGBA")
+    # A small feather avoids a hard cut exactly along the mountain ridge.
+    return mask.filter(ImageFilter.GaussianBlur(radius=2))
 
 
-def wash_out_faint_detail(photo, level):
-    """Reduce the contrast that makes faint stars and dust lanes visible."""
+def fade_compact_stars(photo, level):
+    """Dim small bright points while leaving broad structures sharp."""
     pollution = (level - 1) / 8
     if pollution == 0:
         return photo.copy()
 
-    # Faint stars live mostly in the small, sharp differences between pixels.
-    # Mixing toward a soft copy removes those details without drawing fake stars.
-    soft_radius = 3 + 23 * pollution
-    soft_photo = photo.filter(ImageFilter.GaussianBlur(radius=soft_radius))
-    mixed = Image.blend(photo, soft_photo, 0.20 + 0.74 * pollution)
+    original = np.asarray(photo, dtype=np.float32)
+    local_background = np.asarray(
+        photo.filter(ImageFilter.GaussianBlur(radius=1.2)),
+        dtype=np.float32,
+    )
 
-    contrast = 1.0 - 0.42 * pollution
-    saturation = 1.0 - 0.28 * pollution
-    mixed = ImageEnhance.Contrast(mixed).enhance(contrast)
-    mixed = ImageEnhance.Color(mixed).enhance(saturation)
+    positive_detail = np.maximum(original - local_background, 0)
+    detail_brightness = (
+        0.2126 * positive_detail[:, :, 0]
+        + 0.7152 * positive_detail[:, :, 1]
+        + 0.0722 * positive_detail[:, :, 2]
+    )
 
-    return mixed
+    # Only compact bright points are affected. Large Milky Way structure and
+    # mountain edges do not meet this threshold strongly enough to be smeared.
+    star_mask = np.clip((detail_brightness - 1.5) / 13.0, 0, 1)
+    removal = positive_detail * star_mask[:, :, None] * (0.88 * pollution)
+    faded = np.clip(original - removal, 0, 255)
+
+    return Image.fromarray(faded.astype(np.uint8), "RGB")
+
+
+def add_skyglow(photo, level):
+    """Wash out sky contrast with light, without blurring the photograph."""
+    width, height = SCENE_SIZE
+    pollution = (level - 1) / 8
+    if pollution == 0:
+        return photo.copy()
+
+    y = np.linspace(0, 1, height)[:, None]
+    x = np.linspace(-1, 1, width)[None, :]
+
+    horizon_glow = np.exp(-((y - 0.72) / 0.25) ** 2)
+    city_dome = np.exp(-((x / 0.56) ** 2 + ((y - 0.80) / 0.34) ** 2))
+    upper_haze = 0.14 + 0.18 * y
+
+    strength = upper_haze + 0.44 * horizon_glow + 0.24 * city_dome
+    strength *= pollution**1.30
+
+    # Severe urban skies lose contrast across the whole sky, not only at the
+    # horizon. The cubic term stays small in suburbs and rises sharply at 8–9.
+    strength += 0.45 * pollution**3
+    strength = np.clip(strength, 0, 0.90)
+
+    original = np.asarray(photo, dtype=np.float32) / 255
+
+    # Urban LEDs are often neutral while older lighting is warmer. This muted
+    # tone avoids turning every city sky into a flat orange wall.
+    haze_color = np.zeros_like(original)
+    haze_color[:, :, 0] = 0.64 + 0.13 * horizon_glow
+    haze_color[:, :, 1] = 0.52 + 0.05 * horizon_glow
+    haze_color[:, :, 2] = 0.46
+
+    washed_sky = (
+        original * (1 - strength[:, :, None])
+        + haze_color * strength[:, :, None]
+    )
+
+    washed_sky = Image.fromarray(
+        np.uint8(np.clip(washed_sky * 255, 0, 255)),
+        "RGB",
+    )
+
+    # The foreground comes straight from the source photo. Only the feathered
+    # strip along the true horizon blends with the processed sky.
+    return Image.composite(
+        washed_sky,
+        photo,
+        make_sky_mask(),
+    )
 
 
 def add_photo_credit(image):
@@ -147,15 +234,8 @@ def add_photo_credit(image):
 def render_sky(level):
     """Apply the selected light-pollution effect to the real source photo."""
     source = load_source_photo()
-    image = wash_out_faint_detail(source, level)
-    image = Image.alpha_composite(
-        image.convert("RGBA"),
-        make_haze_layer(level),
-    ).convert("RGB")
-
-    # A slight lift mimics the loss of a truly black background in bright skies.
-    pollution = (level - 1) / 8
-    image = ImageEnhance.Brightness(image).enhance(1.0 + 0.10 * pollution)
+    faded_stars = fade_compact_stars(source, level)
+    image = add_skyglow(faded_stars, level)
     image = add_photo_credit(image)
 
     metrics = {
