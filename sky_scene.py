@@ -74,14 +74,14 @@ SKY_DETAIL_LEFT = {
 # Higher classes require a brighter point before it is kept as a visible star.
 STAR_THRESHOLDS = {
     1: 0,
-    2: 5,
-    3: 10,
-    4: 17,
-    5: 25,
-    6: 34,
-    7: 45,
-    8: 58,
-    9: 72,
+    2: 4,
+    3: 8,
+    4: 13,
+    5: 18,
+    6: 24,
+    7: 32,
+    8: 42,
+    9: 52,
 }
 
 
@@ -202,8 +202,8 @@ def simulate_skyglow(photo, level):
         + 0.0722 * bright_points[:, :, 2]
     )
     threshold = STAR_THRESHOLDS[level]
-    star_gate = np.clip((point_brightness - threshold) / 24, 0, 1)
-    star_strength = 0.70 - (0.38 * pollution)
+    star_gate = np.clip((point_brightness - threshold) / 18, 0, 1)
+    star_strength = 0.78 - (0.32 * pollution)
     faded_sky += (
         bright_points
         * star_gate[:, :, None]
