@@ -25,9 +25,9 @@ The app uses one source photograph for all nine classes. It does not swap betwee
 
 ## How the simulation works
 
-SkyGlow begins with a real panoramic exposure from Cerro Paranal in Chile. As the Bortle level rises, the program identifies small positive brightness details and dims those compact points. It then blends a muted atmospheric-glow layer into the sky.
+SkyGlow begins with a real panoramic exposure from Cerro Paranal in Chile. Each Bortle class uses a deliberately chosen sky-contrast level. The program fades the whole celestial layer—including the broad Milky Way—then restores only compact stars bright enough for that class and adds a muted atmospheric-glow layer.
 
-The boundary of the photographed mountain ridge is stored as a simple sky mask. The original foreground is composited back unchanged, so rocks and terrain remain sharp at every level. The result is a photographic visualization, although it is still not a calibrated prediction for a real address.
+The boundary of the photographed mountain ridge is stored as a simple sky mask. The original foreground is composited back pixel-for-pixel, so rocks and terrain remain sharp at every level. The class-by-class values were visually calibrated together because one smooth formula did not give a believable progression. The result is a photographic visualization, although it is still not a calibrated prediction for a real address.
 
 ## What I learned
 

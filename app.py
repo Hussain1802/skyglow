@@ -270,9 +270,11 @@ with st.expander("How the simulation works"):
     st.write(
         """
         SkyGlow starts with a real panoramic exposure made at ESO's Paranal
-        Observatory. As the Bortle level rises, the app selectively lowers the
-        contrast of compact stars and adds progressively stronger atmospheric glow.
-        The photographed foreground is preserved rather than blurred.
+        Observatory. Each Bortle class has a deliberately chosen contrast level.
+        The program fades the whole celestial layer, keeps only sufficiently bright
+        compact stars, and adds progressively stronger atmospheric glow. That means
+        the broad Milky Way fades too—not only the small stars. The photographed
+        foreground is preserved pixel-for-pixel rather than blurred.
 
         This is still a visual simulation rather than a calibrated prediction for a
         particular address. Weather, eyesight, altitude, Moon phase, camera exposure,
