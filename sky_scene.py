@@ -1,14 +1,14 @@
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 
-WIDTH = 1200
-HEIGHT = 720
+PHOTO_PATH = Path(__file__).parent / "assets" / "paranal-panorama.jpg"
+SCENE_SIZE = (1600, 800)
 
-# These values are deliberately approximate. SkyGlow is a visual explanation,
-# not a calibrated sky-brightness model.
+# These are useful visual guideposts, not promises about a particular address.
 LIMITING_MAGNITUDES = {
     1: 7.6,
     2: 7.1,
@@ -21,8 +21,20 @@ LIMITING_MAGNITUDES = {
     9: 3.8,
 }
 
+VISIBLE_STAR_ESTIMATES = {
+    1: 2600,
+    2: 2200,
+    3: 1700,
+    4: 1200,
+    5: 700,
+    6: 350,
+    7: 170,
+    8: 80,
+    9: 30,
+}
+
 MILKY_WAY_LABELS = {
-    1: "Striking",
+    1: "Unmissable",
     2: "Clearly visible",
     3: "Detailed",
     4: "Visible",
@@ -45,295 +57,109 @@ BORTLE_NAMES = {
     9: "Inner-city sky",
 }
 
-# A few recognizable stars make the scene feel less anonymous. Their positions
-# are arranged for this landscape rather than copied from a planetarium view.
-NAMED_STARS = [
-    ("Vega", 0.22, 0.18, 0.0, "blue"),
-    ("Deneb", 0.36, 0.10, 1.3, "white"),
-    ("Altair", 0.43, 0.34, 0.8, "white"),
-    ("Betelgeuse", 0.72, 0.25, 0.5, "orange"),
-    ("Bellatrix", 0.78, 0.27, 1.6, "blue"),
-    ("Alnitak", 0.75, 0.38, 1.7, "blue"),
-    ("Alnilam", 0.78, 0.39, 1.7, "blue"),
-    ("Mintaka", 0.81, 0.40, 2.2, "blue"),
-    ("Rigel", 0.83, 0.52, 0.1, "blue"),
-    ("Saiph", 0.73, 0.51, 2.1, "blue"),
-]
-
-CONSTELLATION_LINES = [
-    ("Vega", "Deneb"),
-    ("Deneb", "Altair"),
-    ("Altair", "Vega"),
-    ("Betelgeuse", "Bellatrix"),
-    ("Betelgeuse", "Alnitak"),
-    ("Bellatrix", "Mintaka"),
-    ("Alnitak", "Alnilam"),
-    ("Alnilam", "Mintaka"),
-    ("Alnitak", "Saiph"),
-    ("Mintaka", "Rigel"),
-    ("Saiph", "Rigel"),
-]
-
 
 @lru_cache(maxsize=1)
-def make_star_catalogue():
-    """Create one repeatable field of stars for every render."""
-    random = np.random.default_rng(1802)
-    star_count = 5200
+def load_source_photo():
+    """Load a web-sized copy of the real ESO panorama."""
+    with Image.open(PHOTO_PATH) as source:
+        photo = source.convert("RGB")
 
-    x = random.uniform(0.015, 0.985, star_count)
-    y = random.uniform(0.015, 0.78, star_count)
+    # The ESO image is already close to 2:1, so this only trims a few pixels.
+    wanted_ratio = SCENE_SIZE[0] / SCENE_SIZE[1]
+    current_ratio = photo.width / photo.height
 
-    # There are many more faint stars than bright ones.
-    magnitudes = 1.1 + 6.7 * random.random(star_count) ** 0.25
-    colors = random.choice(
-        ["blue", "white", "warm"],
-        size=star_count,
-        p=[0.18, 0.62, 0.20],
-    )
-    twinkle = random.uniform(0.78, 1.0, star_count)
+    if current_ratio > wanted_ratio:
+        new_width = int(photo.height * wanted_ratio)
+        left = (photo.width - new_width) // 2
+        photo = photo.crop((left, 0, left + new_width, photo.height))
+    else:
+        new_height = int(photo.width / wanted_ratio)
+        top = (photo.height - new_height) // 2
+        photo = photo.crop((0, top, photo.width, top + new_height))
 
-    return x, y, magnitudes, colors, twinkle
+    return photo.resize(SCENE_SIZE, Image.Resampling.LANCZOS)
 
 
-def make_sky_background(level):
-    """Paint the blue-black sky and the warm glow near the horizon."""
-    y = np.linspace(0, 1, HEIGHT)[:, None]
-
+def make_haze_layer(level):
+    """Build warm atmospheric glow, strongest near the horizon."""
+    width, height = SCENE_SIZE
     pollution = (level - 1) / 8
-    top = np.array([3, 7, 20], dtype=float)
-    horizon_dark = np.array([12, 22, 42], dtype=float)
-    horizon_city = np.array([132, 84, 53], dtype=float)
-    horizon = horizon_dark * (1 - pollution) + horizon_city * pollution
 
-    vertical_blend = np.clip((y - 0.18) / 0.82, 0, 1) ** 2.3
-    sky = top[None, None, :] * (1 - vertical_blend[:, :, None])
-    sky += horizon[None, None, :] * vertical_blend[:, :, None]
-    sky = np.repeat(sky, WIDTH, axis=1)
+    y = np.linspace(0, 1, height)[:, None]
+    horizon_glow = np.exp(-((y - 0.66) / 0.24) ** 2)
+    upper_haze = 0.20 + 0.30 * y
+    strength = (0.18 * upper_haze + 0.70 * horizon_glow) * pollution**1.15
 
-    # A broad dome makes city glow feel less like a flat color gradient.
-    x = np.linspace(-1, 1, WIDTH)[None, :]
-    dome = np.exp(-((x / 0.56) ** 2 + ((y - 1.03) / 0.38) ** 2))
-    glow_color = np.array([235, 138, 62], dtype=float)
-    sky += dome[:, :, None] * glow_color * (pollution**1.4) * 0.42
+    # The mask fades before reaching the ground, so the landscape stays solid.
+    sky_mask = np.clip((0.83 - y) / 0.14, 0, 1)
+    strength *= sky_mask
+    strength = np.repeat(strength, width, axis=1)
 
-    return Image.fromarray(np.uint8(np.clip(sky, 0, 255)), "RGB")
+    haze = np.zeros((height, width, 4), dtype=np.uint8)
+    haze[:, :, 0] = 226
+    haze[:, :, 1] = 132
+    haze[:, :, 2] = 72
+    haze[:, :, 3] = np.uint8(np.clip(strength * 255, 0, 225))
 
-
-def add_milky_way(image, level):
-    """Add a soft, irregular Milky Way band that fades with skyglow."""
-    strength = np.clip(1.12 - (level - 1) / 5.4, 0, 1)
-    if strength <= 0:
-        return image
-
-    random = np.random.default_rng(42)
-    small_noise = random.random((90, 150))
-    noise_image = Image.fromarray(np.uint8(small_noise * 255))
-    noise_image = noise_image.resize((WIDTH, HEIGHT), Image.Resampling.BICUBIC)
-    noise = np.asarray(noise_image, dtype=float) / 255
-
-    yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH]
-    center_line = HEIGHT * (0.68 - 0.72 * xx / WIDTH)
-    center_line += 25 * np.sin(xx / WIDTH * np.pi * 2)
-    distance = np.abs(yy - center_line)
-
-    broad_band = np.exp(-((distance / 115) ** 2))
-    bright_core = np.exp(-((distance / 40) ** 2))
-    texture = 0.42 + 0.58 * noise
-    mask = np.clip((broad_band * 0.36 + bright_core * 0.34) * texture, 0, 1)
-    mask *= strength
-    mask *= np.clip((HEIGHT * 0.80 - yy) / 110, 0, 1)
-
-    cloud_color = np.zeros((HEIGHT, WIDTH, 4), dtype=np.uint8)
-    cloud_color[:, :, 0] = 132
-    cloud_color[:, :, 1] = 151
-    cloud_color[:, :, 2] = 188
-    cloud_color[:, :, 3] = np.uint8(mask * 118)
-
-    layer = Image.fromarray(cloud_color, "RGBA").filter(
-        ImageFilter.GaussianBlur(radius=3)
-    )
-    return Image.alpha_composite(image.convert("RGBA"), layer).convert("RGB")
+    return Image.fromarray(haze, "RGBA")
 
 
-def add_stars(image, level):
-    """Draw every star bright enough to survive the selected skyglow."""
-    x, y, magnitudes, colors, twinkle = make_star_catalogue()
-    limiting_magnitude = LIMITING_MAGNITUDES[level]
-    visible = magnitudes <= limiting_magnitude
+def wash_out_faint_detail(photo, level):
+    """Reduce the contrast that makes faint stars and dust lanes visible."""
+    pollution = (level - 1) / 8
+    if pollution == 0:
+        return photo.copy()
 
-    star_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(star_layer)
+    # Faint stars live mostly in the small, sharp differences between pixels.
+    # Mixing toward a soft copy removes those details without drawing fake stars.
+    soft_radius = 3 + 23 * pollution
+    soft_photo = photo.filter(ImageFilter.GaussianBlur(radius=soft_radius))
+    mixed = Image.blend(photo, soft_photo, 0.20 + 0.74 * pollution)
 
-    palette = {
-        "blue": (192, 217, 255),
-        "white": (245, 247, 255),
-        "warm": (255, 225, 185),
-    }
+    contrast = 1.0 - 0.42 * pollution
+    saturation = 1.0 - 0.28 * pollution
+    mixed = ImageEnhance.Contrast(mixed).enhance(contrast)
+    mixed = ImageEnhance.Color(mixed).enhance(saturation)
 
-    visible_indices = np.flatnonzero(visible)
-    for index in visible_indices:
-        px = int(x[index] * WIDTH)
-        py = int(y[index] * HEIGHT)
-        magnitude = magnitudes[index]
-
-        brightness = (limiting_magnitude - magnitude + 0.7) / 6.5
-        brightness = np.clip(brightness, 0.10, 1.0) * twinkle[index]
-        radius = 0.45 + 2.0 * brightness**1.8
-        color = palette[colors[index]]
-        alpha = int(80 + 175 * brightness)
-
-        if radius > 1.4:
-            glow_radius = radius * 3.2
-            glow_color = (*color, int(alpha * 0.13))
-            draw.ellipse(
-                (
-                    px - glow_radius,
-                    py - glow_radius,
-                    px + glow_radius,
-                    py + glow_radius,
-                ),
-                fill=glow_color,
-            )
-
-        draw.ellipse(
-            (px - radius, py - radius, px + radius, py + radius),
-            fill=(*color, alpha),
-        )
-
-    star_layer = star_layer.filter(ImageFilter.GaussianBlur(radius=0.25))
-    image = Image.alpha_composite(image.convert("RGBA"), star_layer)
-    return image.convert("RGB"), int(visible.sum())
+    return mixed
 
 
-def add_named_stars(image, level, show_lines, show_labels):
-    """Add the small Orion and Summer Triangle overlays."""
-    limiting_magnitude = LIMITING_MAGNITUDES[level]
-    positions = {
-        name: (int(x * WIDTH), int(y * HEIGHT))
-        for name, x, y, magnitude, color in NAMED_STARS
-        if magnitude <= limiting_magnitude
-    }
-
+def add_photo_credit(image):
+    """Keep the required image credit attached to downloaded scenes."""
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
+    credit = "Photo: ESO/P. Horálek · Skyglow effect simulated"
 
-    if show_lines:
-        for start, end in CONSTELLATION_LINES:
-            if start in positions and end in positions:
-                draw.line(
-                    (positions[start], positions[end]),
-                    fill=(128, 169, 210, 105),
-                    width=2,
-                )
+    box = draw.textbbox((0, 0), credit)
+    text_width = box[2] - box[0]
+    x = image.width - text_width - 18
+    y = image.height - 28
 
-    star_colors = {
-        "blue": (194, 222, 255),
-        "white": (255, 255, 246),
-        "orange": (255, 188, 126),
-    }
-    for name, x, y, magnitude, color in NAMED_STARS:
-        if magnitude > limiting_magnitude:
-            continue
-
-        px, py = int(x * WIDTH), int(y * HEIGHT)
-        radius = max(2.0, 4.4 - magnitude * 0.7)
-        draw.ellipse(
-            (px - radius * 3, py - radius * 3, px + radius * 3, py + radius * 3),
-            fill=(*star_colors[color], 35),
-        )
-        draw.ellipse(
-            (px - radius, py - radius, px + radius, py + radius),
-            fill=(*star_colors[color], 255),
-        )
-
-        if show_labels and name in {"Vega", "Deneb", "Altair", "Betelgeuse", "Rigel"}:
-            draw.text(
-                (px + 9, py - 13),
-                name,
-                fill=(224, 233, 247, 205),
-                stroke_width=2,
-                stroke_fill=(2, 6, 15, 190),
-            )
-
+    draw.rounded_rectangle(
+        (x - 8, y - 5, image.width - 8, image.height - 7),
+        radius=5,
+        fill=(2, 5, 12, 150),
+    )
+    draw.text((x, y), credit, fill=(235, 239, 247, 220))
     return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 
-def add_landscape(image, level):
-    """Finish the scene with hills, a distant city, and warm window lights."""
-    random = np.random.default_rng(92)
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+def render_sky(level):
+    """Apply the selected light-pollution effect to the real source photo."""
+    source = load_source_photo()
+    image = wash_out_faint_detail(source, level)
+    image = Image.alpha_composite(
+        image.convert("RGBA"),
+        make_haze_layer(level),
+    ).convert("RGB")
 
-    # Layered hills keep the bottom edge from feeling like a graph.
-    distant_hill = [
-        (0, 590),
-        (130, 540),
-        (260, 578),
-        (420, 520),
-        (590, 575),
-        (760, 532),
-        (930, 580),
-        (1080, 525),
-        (WIDTH, 560),
-        (WIDTH, HEIGHT),
-        (0, HEIGHT),
-    ]
-    draw.polygon(distant_hill, fill=(8, 14, 24, 238))
-
-    near_hill = [
-        (0, 640),
-        (180, 595),
-        (340, 628),
-        (510, 580),
-        (700, 640),
-        (870, 594),
-        (1030, 625),
-        (WIDTH, 590),
-        (WIDTH, HEIGHT),
-        (0, HEIGHT),
-    ]
-    draw.polygon(near_hill, fill=(3, 7, 13, 255))
-
+    # A slight lift mimics the loss of a truly black background in bright skies.
     pollution = (level - 1) / 8
-    building_count = int(5 + pollution * 35)
-    for _ in range(building_count):
-        x = int(random.uniform(0, WIDTH))
-        building_width = int(random.uniform(10, 28))
-        building_height = int(random.uniform(12, 68) * (0.5 + pollution))
-        base_y = int(623 + random.uniform(-8, 20))
-        top_y = base_y - building_height
-        draw.rectangle(
-            (x, top_y, x + building_width, base_y),
-            fill=(4, 7, 13, 255),
-        )
-
-        if level >= 4 and random.random() < 0.72:
-            for window_y in range(top_y + 8, base_y - 4, 10):
-                if random.random() < 0.56:
-                    draw.rectangle(
-                        (x + 4, window_y, x + 7, window_y + 3),
-                        fill=(255, 185, 88, int(120 + pollution * 120)),
-                    )
-
-    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
-
-
-def render_sky(level, show_lines=True, show_labels=False):
-    """Render one complete SkyGlow scene and return it with the key metrics."""
-    image = make_sky_background(level)
-    image = add_milky_way(image, level)
-    image, star_count = add_stars(image, level)
-    image = add_named_stars(image, level, show_lines, show_labels)
-    image = add_landscape(image, level)
-
-    named_visible = sum(
-        magnitude <= LIMITING_MAGNITUDES[level]
-        for _, _, _, magnitude, _ in NAMED_STARS
-    )
+    image = ImageEnhance.Brightness(image).enhance(1.0 + 0.10 * pollution)
+    image = add_photo_credit(image)
 
     metrics = {
-        "visible_stars": star_count + named_visible,
+        "visible_stars": VISIBLE_STAR_ESTIMATES[level],
         "limiting_magnitude": LIMITING_MAGNITUDES[level],
         "milky_way": MILKY_WAY_LABELS[level],
         "class_name": BORTLE_NAMES[level],

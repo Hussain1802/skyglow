@@ -107,8 +107,8 @@ st.markdown('<h1 class="hero-title">What does a city<br>take from the sky?</h1>'
 st.markdown(
     """
     <p class="hero-copy">
-        Move from a dark-sky reserve to the middle of a city and watch faint stars,
-        the Milky Way, and familiar patterns disappear into skyglow.
+        Move one real night-sky photograph from a protected dark site into the
+        middle of a city and watch its contrast disappear into skyglow.
     </p>
     """,
     unsafe_allow_html=True,
@@ -156,42 +156,54 @@ with control_column:
     st.caption(f"Class {level} · {BORTLE_NAMES[level]}")
 
 with option_column:
-    show_lines = st.toggle("Constellation guides", value=True)
-    show_labels = st.toggle("Bright-star labels", value=False)
+    view_mode = st.radio(
+        "View mode",
+        options=["Side by side", "Selected sky only"],
+        horizontal=True,
+    )
 
 
-dark_sky, dark_metrics = render_sky(
-    1,
-    show_lines=show_lines,
-    show_labels=show_labels,
-)
-selected_sky, selected_metrics = render_sky(
-    level,
-    show_lines=show_lines,
-    show_labels=show_labels,
-)
+dark_sky, dark_metrics = render_sky(1)
+selected_sky, selected_metrics = render_sky(level)
 
 
 st.divider()
-left_scene, right_scene = st.columns(2)
 
-with left_scene:
-    st.markdown('<div class="scene-label">REFERENCE · BORTLE 1</div>', unsafe_allow_html=True)
-    st.image(dark_sky, width="stretch")
+if view_mode == "Side by side":
+    left_scene, right_scene = st.columns(2)
 
-with right_scene:
+    with left_scene:
+        st.markdown(
+            '<div class="scene-label">REAL PHOTOGRAPH · BORTLE 1 REFERENCE</div>',
+            unsafe_allow_html=True,
+        )
+        st.image(dark_sky, width="stretch")
+
+    with right_scene:
+        st.markdown(
+            f'<div class="scene-label">SIMULATED SKY GLOW · BORTLE {level}</div>',
+            unsafe_allow_html=True,
+        )
+        st.image(selected_sky, width="stretch")
+else:
     st.markdown(
-        f'<div class="scene-label">SELECTED · BORTLE {level}</div>',
+        f'<div class="scene-label">SIMULATED SKY GLOW · BORTLE {level}</div>',
         unsafe_allow_html=True,
     )
     st.image(selected_sky, width="stretch")
+
+st.caption(
+    "Source photograph: ESO/P. Horálek, Cerro Paranal, Chile · "
+    "[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) · "
+    "[Original image](https://www.eso.org/public/images/potw2033a/)"
+)
 
 
 st.subheader("What remains visible")
 metric_columns = st.columns(4)
 
 metric_columns[0].metric(
-    "Stars in this view",
+    "Approx. stars overhead",
     f"{selected_metrics['visible_stars']:,}",
     delta=f"{selected_metrics['visible_stars'] - dark_metrics['visible_stars']:,} from dark sky",
     delta_color="normal",
@@ -250,20 +262,20 @@ with download_column:
 
 with note_column:
     st.caption(
-        "Try switching the constellation guides off before downloading for a clean landscape."
+        "The downloaded image keeps the photographer credit attached."
     )
 
 
 with st.expander("How the simulation works"):
     st.write(
         """
-        SkyGlow generates the same field of stars for every scene, then removes stars
-        fainter than an approximate naked-eye limiting magnitude for each Bortle class.
-        It also fades the Milky Way and adds progressively stronger horizon glow.
+        SkyGlow starts with a real panoramic exposure made at ESO's Paranal
+        Observatory. As the Bortle level rises, the app softens faint detail,
+        lowers contrast, and adds progressively stronger warm atmospheric glow.
 
-        The scenes are illustrations, not a planetarium or a calibrated prediction for
-        a particular address. Weather, eyesight, altitude, Moon phase, and local lighting
-        can all change what a real observer sees.
+        This is still a visual simulation rather than a calibrated prediction for a
+        particular address. Weather, eyesight, altitude, Moon phase, camera exposure,
+        and local lighting can all change what a real observer or camera records.
         """
     )
 
@@ -271,11 +283,10 @@ st.markdown(
     """
     <div class="honesty-note">
         <strong>Designed to explain, not to predict.</strong>
-        Star positions are arranged as an illustrative landscape, and the visibility
-        thresholds are approximate. SkyGlow is meant to make the effect of light
-        pollution intuitive without pretending the simulation is an observing forecast.
+        The base scene is a genuine ESO photograph; only the light-pollution effect is
+        simulated. The visibility thresholds are approximate, and the original photograph
+        is a long exposure rather than a literal naked-eye view.
     </div>
     """,
     unsafe_allow_html=True,
 )
-
